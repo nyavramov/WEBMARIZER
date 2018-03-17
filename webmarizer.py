@@ -9,21 +9,44 @@ os.chdir(os.path.dirname(os.path.abspath(sys.argv[0])))
 
 # Lots of terrible global variables. Let's promise ourselves to fix this later, mkay?
 stopped = False
-bitrate=1500
+bitrate = 1500
 videosList = []
 numWEBM = 5
 lenLimit = 0
 totalSeconds = 0
 fileSize = 0
-webmDuration = 8
+outputDuration = 8
 numFiles = 0
-webmWidth = 500
+outputWidth = 500
 returnedVideoList = False 
 selectedVideo = ""
 audioEnabled = False
 audioDisable = '-an'
 targetSizeSet = False
-someprocess = QtCore.QProcess()
+output_type = 'GIF'
+
+FFmpegProcess = QtCore.QProcess()
+
+'''
+      fileName="${1}"; start="${2}"; outputName=${fileName%.*}
+
+      echo "Creating ${outputName}_${numFiles}.gif at time: ${start} seconds."
+
+      ffmpeg -ss "${start}" -t "${duration}" -v error -i "${fileName}" \
+            -vf "$filters,palettegen" \-y palette.png # Create palette for video
+      ffmpeg -ss "${start}" -t "${duration}" -v error -i "${fileName}" \
+            -i palette.png -lavfi "$filters [x]; [x][1:v] paletteuse" -y \
+            "${outputName}_${numFiles}.gif" # Create GIF
+      args_palette = [
+        '-ss',  str(startTime),
+        '-t',   str(outputDuration),
+        '-i' ,  fileName,
+        '-vf',  filters +',palettegen',
+        '-y',   'palette.png'
+    ]
+
+      rm "palette.png" #Remove palette
+'''
 
 # We'll need this to access ffmpeg & ffprobe once pyinstaller has created one-file executable
 # Returns some sort of temp directory
@@ -41,13 +64,52 @@ else:
     ffmpeg_path = resource_path('ffmpeg')
     ffprobe_path = resource_path('ffprobe')
 
+def createGif(fileName, startTime):
+    fileName_gif = os.path.splitext(fileName)[0] + '_' + str(numFiles) + '.gif'
+    scaleString = 'scale=' + str(outputWidth) + ':-2'
+    filters='fps=20,scale=' + str(outputWidth) + ':-1:flags=lanczos'
+    
+    # 1st Generate a pallete with ffmpeg
+    args_palette = [
+        '-ss',  str(startTime),
+        '-t',   str(outputDuration),
+        '-i' ,  fileName,
+        '-vf',  filters+",palettegen",
+        '-y',   'palette.png'
+    ]
+
+    # 2nd Generate the gif using the palette
+    args_gif = [
+        '-ss',  str(startTime),
+        '-t',   str(outputDuration),
+        '-i' ,  fileName,
+        '-i',   'palette.png',
+        '-fs',  str(fileSize/1000) + "M",
+        '-lavfi', filters+"[x];[x][1:v]paletteuse",
+        '-y', fileName_gif
+    ]
+
+    print("THE FILE SIZE IS: " + str(fileSize/1000) + "M")
+
+    GUI.setStatusText("Currently creating: " + fileName_gif)
+    FFmpegProcess.setProcessChannelMode(QtCore.QProcess.MergedChannels)
+    app.processEvents()
+
+    if (stopped == False):
+        FFmpegProcess.execute(ffmpeg_path, args_palette)
+        FFmpegProcess.waitForFinished(-1)
+        FFmpegProcess.execute(ffmpeg_path, args_gif)
+        FFmpegProcess.waitForFinished(-1)
+        os.remove("palette.png")
+
+
 # Use ffmpeg to create WEBM and read its stdout. To-Do:Use some regex later for progress bar
 def createWebm(fileName, startTime):
     fileName_webm = os.path.splitext(fileName)[0] + '_' + str(numFiles) + '.webm'
-    scaleString = 'scale=' + str(webmWidth) + ':-2'
+    scaleString = 'scale=' + str(outputWidth) + ':-2'
     args = ['-y',
         '-ss',  str(startTime),
-        '-t',   str(webmDuration),
+        '-t',   str(outputDuration),
         '-i' ,  fileName,
         '-vf',  scaleString,
         '-c:v',  'libvpx',
@@ -61,11 +123,11 @@ def createWebm(fileName, startTime):
     args.append(fileName_webm)
 
     GUI.setStatusText("Currently creating: " + fileName_webm)
-    someprocess.setProcessChannelMode(QtCore.QProcess.MergedChannels)
+    FFmpegProcess.setProcessChannelMode(QtCore.QProcess.MergedChannels)
     app.processEvents()
     if (stopped == False):
-        someprocess.execute(ffmpeg_path, args)
-        someprocess.waitForFinished(-1)
+        FFmpegProcess.execute(ffmpeg_path, args)
+        FFmpegProcess.waitForFinished(-1)
 
 # Searches current directory for .mp4,.wmv,.avi, and .mpeg videos
 def createVideoList():
@@ -89,6 +151,7 @@ def processVideo(aVideo):
         '-of'             , 'csv=%s' % ("p=0"),
         '-i'              ,  aVideo
     ]
+
     # We can use ffprobe to check the number of seconds in the video
     totalSeconds = subprocess.check_output(args)
 
@@ -112,7 +175,11 @@ def processVideo(aVideo):
                 break
             global numFiles
             numFiles += 1
-            createWebm(aVideo, startTime)
+            if output_type == 'WEBM':
+                createWebm(aVideo, startTime)
+            else:
+                createGif(aVideo, startTime)
+
             startTime += interval
         else:
             app.processEvents() 
@@ -121,7 +188,7 @@ def processVideo(aVideo):
 # Makes sure WEBM length "L" isn't created at startTime + L > Length of video
 def getLenLimit():
     global lenLimit
-    lenLimit = totalSeconds - webmDuration - 1
+    lenLimit = totalSeconds - outputDuration - 1
 
 # Starts going through all the videos and initiates WEBM creation process
 def init():
@@ -290,6 +357,19 @@ class Ui_MainWindow(object):
         self.createBtn.raise_()
         self.startSingleBtn.raise_()
         self.stopBtn.raise_()
+        self.gifModeCheckBox = QtWidgets.QCheckBox(self.widget)
+        sizePolicy.setHeightForWidth(self.gifModeCheckBox.sizePolicy().hasHeightForWidth())
+        self.gifModeCheckBox.setSizePolicy(sizePolicy)
+        self.gifModeCheckBox.setText("")
+        self.gifModeCheckBox.setObjectName("gifModeCheckBox")
+        self.gifModeCheckBox.setEnabled(True)
+        self.gifModeCheckBox.stateChanged.connect(self.enableGifMode)
+        self.horizontalLayout_2.addWidget(self.gifModeCheckBox)
+        self.gifModeLabel = QtWidgets.QLabel(self.widget)
+        self.gifModeLabel.setEnabled(True)
+        self.gifModeLabel.setTextFormat(QtCore.Qt.RichText)
+        self.gifModeLabel.setObjectName("gifModeLabel")
+        self.horizontalLayout_2.addWidget(self.gifModeLabel)
         self.listWidget.itemSelectionChanged.connect(self.setSelected)
         self.listWidget.setAttribute(QtCore.Qt.WA_MacShowFocusRect, 0)
         self.durationSlider.valueChanged.connect(self.editDurationLabel)
@@ -332,12 +412,15 @@ class Ui_MainWindow(object):
         self.numWEBMLabel.setText(_translate("MainWindow", "<html><head/><body><p><span style=\" font-size:16pt;\">Number of WEBMs:</span></p></body></html>"))
         self.bitrateLabel.setText(_translate("MainWindow", "<html><head/><body><p><span style=\" font-size:16pt;\">Bitrate:</span></p></body></html>"))
         self.targetFileSizeLabel.setText(_translate("MainWindow", "<html><head/><body><p><span style=\" font-size:16pt;\">Target File Size:</span></p></body></html>"))
+        
         if (platform.system() == 'Windows'): # For some reason Mac OSX and Windows font sizes differ? 
             self.enableAudioLabel.setText(_translate("MainWindow", "<html><head/><body><p><span style=\" font-size:8pt;\">Enable Audio</span></p></body></html>"))
             self.targetSizeCheckmarkLabel.setText(_translate("MainWindow", "<html><head/><body><p><span style=\" font-size:8pt;\">Enable Target File Size</span></p></body></html>"))
+            self.gifModeLabel.setText(_translate("MainWindow", "<html><head/><body><p><span style=\" font-size:8pt;\">Enable Gif Mode</span></p></body></html>"))
         else:
             self.enableAudioLabel.setText(_translate("MainWindow", "<html><head/><body><p><span style=\" font-size:16pt;\">Enable Audio</span></p></body></html>"))
             self.targetSizeCheckmarkLabel.setText(_translate("MainWindow", "<html><head/><body><p><span style=\" font-size:16pt;\">Enable Target File Size</span></p></body></html>"))
+            self.gifModeLabel.setText(_translate("MainWindow", "<html><head/><body><p><span style=\" font-size:16pt;\">Enable Gif Mode</span></p></body></html>"))
 
     # Determine the video currently selected in the video list
     def setSelected(self):
@@ -346,19 +429,34 @@ class Ui_MainWindow(object):
 
     # Attempts to kill WEBM creation process
     def stopProcess(self):
-        global someprocess, stopped
-        someprocess.kill()
+        global FFmpegProcess, stopped
+        FFmpegProcess.kill()
         stopped = True
+
+    def enableGifMode(self):
+        global output_type
+        if (self.gifModeCheckBox.isChecked()):
+            output_type = 'GIF'
+            self.durationLabel.setText("GIF Duration: " + str(self.durationSlider.value()) + " seconds")
+            self.sizeLabel.setText("GIF Width: " + str(self.sizeSlider.value()) + " px")
+            self.numWEBMLabel.setText("Number of GIFs: " + str(self.numWEBMSlider.value()))
+        else:
+            output_type = 'WEBM'
+            self.editDurationLabel()
+            self.editSizeLabel()
+            self.editNumWEBMLabel()
+        print("Current Mode: " + output_type)
+
 
     # Sets label to user selected WEBM duration from slider value
     def editDurationLabel(self):
         self.durationLabel.setText("WEBM Duration: " + str(self.durationSlider.value()) + " seconds")
-        self.editWebmDuration()
+        self.editoutputDuration()
 
     # Sets webm duration to corresponding slider value
-    def editWebmDuration(self):
-        global webmDuration
-        webmDuration = self.durationSlider.value()
+    def editoutputDuration(self):
+        global outputDuration
+        outputDuration = self.durationSlider.value()
         if targetSizeSet:
             self.editFileSize()
 
@@ -403,7 +501,7 @@ class Ui_MainWindow(object):
     def editFileSize(self):
         global fileSize
         fileSize = self.fileSizeSlider.value()
-        video_bitrate = ( ( fileSize * 8 * 1000 ) / webmDuration ) - 96000 #96 kbps audio bitrate
+        video_bitrate = ( ( fileSize * 8 * 1000 ) / outputDuration ) - 96000 #96 kbps audio bitrate
         self.bitRateSlider.setSliderPosition(video_bitrate / 1000)
 
     # Set the WEBM width label text to slider value
@@ -413,8 +511,8 @@ class Ui_MainWindow(object):
 
     # Set WEBM width variable to corresponding slider value
     def editSize(self):
-        global webmWidth
-        webmWidth = self.sizeSlider.value()
+        global outputWidth
+        outputWidth = self.sizeSlider.value()
 
     # Sets WEBM number label text to slider value
     def editNumWEBMLabel(self):
