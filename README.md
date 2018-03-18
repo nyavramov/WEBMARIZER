@@ -2,6 +2,7 @@
 
 ![](https://i.imgur.com/3PQKmFq.png)
 
+
 ## What is it?
 
 Webmarizer is a GUI wrapper for FFmpeg.
@@ -9,6 +10,8 @@ Webmarizer is a GUI wrapper for FFmpeg.
 ## What does it do?
 
 One click - multiple GIFS or WEBMs from a single video.
+
+![](https://i.imgur.com/cFoMwoj.gif)
 
 WEBMARIZER automatically 'summarizes' a video by creating multiple WEBMs / GIFs per video in your folder. This is similar to a video thumbnails sheet but in GIF/WEBM form. Videos must be located in same folder that the program is in. 
 
