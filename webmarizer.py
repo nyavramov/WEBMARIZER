@@ -32,11 +32,22 @@ def getDependencyPath(dependency):
             path = resource_path('ffprobe')
     return path
 
+# Generates the file name for output, creates sub directory if specified
+def generateOuput_filename(params, fileName, extension, numFiles):
+    if params['output_to_subdir']:
+        if not os.path.isdir(params['output_dir_name']):
+            os.makedirs(params['output_dir_name'])
+        return os.path.join(params['output_dir_name'], os.path.splitext(fileName)[0] + '_' + str(numFiles) + '.' + extension)
+    else:
+        return os.path.splitext(fileName)[0] + '_' + str(numFiles) + '.' + extension
+
 # Create a GIF by first creating a palette, then making GIF from that palette
 # To-do: add option to control framerate
 def createGif(params):
-    fileNameNoExtension = os.path.splitext(params['fileName'])[0]
-    fileName_gif = fileNameNoExtension + '_' + str(params['numFiles']) + '.gif'
+    fileName_gif = generateOuput_filename(params=params,
+                                           fileName=str(params['fileName']),
+                                           extension='gif',
+                                           numFiles=params['numFiles'])
 
     # Set the size of the GIF and filters
     scaleString = 'scale=' + str(params['outputWidth']) + ':-2'
@@ -96,8 +107,10 @@ def createGif(params):
 
 # Use ffmpeg to create WEBM and read its stdout. To-Do:Use some regex later for progress bar
 def createWebm(params):
-    fileNameNoExtension = os.path.splitext(params['fileName'])[0]
-    fileName_webm = fileNameNoExtension + '_' + str(params['numFiles']) + '.webm'
+    fileName_webm = generateOuput_filename(params=params,
+                                           fileName=str(params['fileName']),
+                                           extension='webm',
+                                           numFiles=params['numFiles'])
 
     scaleString = 'scale=' + str(params['outputWidth']) + ':-2'
     
@@ -402,6 +415,11 @@ def composeMediaParamDictionary(aVideo):
     # Use this to check if user has stopped the program
     stopped = GUI.getProcessStoppedStatus()
 
+    # output dir feature
+    output_to_subdir = GUI.output_to_subdir
+    output_dir_name = GUI.output_dir_name
+
+
     # Set all key:value pairs for param dictionary
     params = {
         'fileName'              : aVideo, 
@@ -424,7 +442,9 @@ def composeMediaParamDictionary(aVideo):
         'bitrate'               : bitrate,
         'audioEnabled'          : audioEnabled,
         'stopped'               : stopped,
-        'thumbnailNumTilesSide' : thumbnailNumTilesSide
+        'thumbnailNumTilesSide' : thumbnailNumTilesSide,
+        'output_to_subdir'      : output_to_subdir,
+        'output_dir_name'       : output_dir_name
     }
 
     return params
@@ -940,6 +960,8 @@ class Ui_MainWindow(object):
         self.audioEnabled          = True              # Used to check if user wants audio in WEBM or not
         self.bitrate               = 1500              # Helps specify what bitrate user needs for WEBM
         self.selectedVideo         = ""                # Used to save selected video from list widget
+        self.output_to_subdir      = False              # sets if output is to be to a sub folder or not
+        self.output_dir_name       = 'output'          # Destination sub directory
 
         # Set defaults for GUI slider positions, checkboxes, and labels
         self.durationSlider.setSliderPosition(10)
@@ -1413,6 +1435,12 @@ class Ui_MainWindow(object):
     # To-do: Add ability to select multiple videos from list using command/shift/ctrl etc
     def createSelectedMedia(self):
         processVideo(self.selectedVideo)
+
+    def getOutputSubDir(self):
+        return self.output_to_subdir
+
+    def getOutputDirName(self):
+        return self.output_dir_name
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
